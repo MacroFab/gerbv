@@ -22,22 +22,23 @@ dnl  along with this program; if not, write to the Free Software
 dnl  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111 USA
 
 
-AC_INIT([gerbv], [2.7A])
+AC_INIT([gerbv], [m4_esyscmd(utils/git-version-gen.sh 2.9.7-rc.1)])
 AC_CONFIG_SRCDIR([src/gerbv.c])
-AC_PREREQ([2.59])
+AC_PREREQ([2.69])
 AM_INIT_AUTOMAKE([1.9])
-AC_GNU_SOURCE
+AC_USE_SYSTEM_EXTENSIONS
 AC_CONFIG_MACRO_DIR([m4])
 
 dnl Create a configuration header 
-AM_CONFIG_HEADER([config.h])
+AC_CONFIG_HEADERS([config.h])
 
 dnl Initialize maintainer mode
 AM_MAINTAINER_MODE
 
 dnl Internationalisation
+dnl https://www.gnu.org/software/gettext/manual/html_node/AM_005fGNU_005fGETTEXT.html
 AM_NLS
-AM_GNU_GETTEXT
+AM_GNU_GETTEXT([external])
 AM_GNU_GETTEXT_VERSION([0.19])
 #AX_DESKTOP_I18N
 
@@ -168,13 +169,12 @@ AM_SANITY_CHECK
 
 dnl Checks for programs.
 AC_PROG_CC
-AC_PROG_CC_C99
 if test "x$enable_dxf " != "xno" ; then
 AC_PROG_CXX
 fi
 AC_PROG_MAKE_SET
 AC_PROG_INSTALL
-AC_PROG_LIBTOOL
+LT_INIT
 
 if test "x$WIN32" = "xyes" ; then
 	AC_CHECK_TOOL(WINDRES, windres, no)
@@ -221,8 +221,8 @@ fi
 AM_CONDITIONAL(HAVE_MAGICK, test x$have_magick = xyes)
 
 # Check for pkg-config
-AC_PATH_PROG(PKG_CONFIG, pkg-config, no)
-if test "$PKG_CONFIG" = "no"; then
+PKG_PROG_PKG_CONFIG
+if test "x$PKG_CONFIG" = "x"; then
 	AC_MSG_ERROR([Cannot find pkg-config, make sure it is installed and in your PATH])
 fi
 
@@ -299,7 +299,9 @@ if test "X$enable_dxf " != "Xno" ; then
 	]], [[
 if (!strncmp("2.2.",  DL_VERSION, 4)
  || !strncmp("2.5.",  DL_VERSION, 4)
- || !strncmp("3.12.", DL_VERSION, 5))
+ || !strncmp("3.12.", DL_VERSION, 5)
+ || !strncmp("3.17.", DL_VERSION, 5)
+ || !strncmp("3.26.", DL_VERSION, 5))
 	return 0;
 
 return 1;
@@ -366,8 +368,7 @@ fi
 AC_SUBST(XDGDATADIR)
 
 AC_ARG_ENABLE(update-desktop-database,
-	AC_HELP_STRING([--disable-update-desktop-database],
-	[do not update desktop database after installation]),,
+	AS_HELP_STRING([--disable-update-desktop-database],[do not update desktop database after installation]),,
 	enable_update_desktop_database=yes)
 
 AM_CONDITIONAL(ENABLE_UPDATE_DESKTOP_DATABASE, test x$enable_update_desktop_database = xyes)
@@ -391,11 +392,14 @@ AC_CHECK_FUNCS(strlwr)
 AC_CHECK_FUNCS(realpath canonicalize_file_name)
 libiberty_NEED_DECLARATION(canonicalize_file_name)
 
+AC_SUBST([GTK_CFLAGS_ISYSTEM], ['$(subst -I/usr/include/gtk-2.0,-isystem /usr/include/gtk-2.0,$(GTK_CFLAGS))'])
 
-CFLAGS="$CFLAGS $GDK_PIXBUF_CFLAGS $GTK_CFLAGS $CAIRO_CFLAGS"
-LIBS="$LIBS $GDK_PIXBUF_LIBS $GTK_LIBS $CAIRO_LIBS"
+CFLAGS="$CFLAGS $GDK_PIXBUF_CFLAGS $GTK_CFLAGS_ISYSTEM $CAIRO_CFLAGS"
+LIBS="$LIBS $GDK_PIXBUF_LIBS $GTK_LIBS $CAIRO_LIBS -lm"
 
-CPPFLAGS="$CPPFLAGS $GTK_CFLAGS"
+AC_ARG_VAR([CPPFLAGS_EXTRA], [Additional flags when compiling])
+
+CPPFLAGS="$CPPFLAGS $GTK_CFLAGS_ISYSTEM $CPPFLAGS_EXTRA"
 
 ############################################################
 #
@@ -414,6 +418,8 @@ AC_DEFINE([USE_INTERFACE],[1],[Use extension interface of Scheme interpreter])
 #
 #
 ############################################################
+
+AX_CODE_COVERAGE
 
 ############################################################
 #
@@ -451,7 +457,7 @@ AC_DEFINE_UNQUOTED(BINDIR_TO_EXECPREFIX, "$bindir_to_execprefix", [Relative path
 #
 ############################################################
 
-AC_OUTPUT(	Makefile \
+AC_CONFIG_FILES([Makefile \
 		src/Makefile \
 		src/libgerbv.pc \
 		scheme/Makefile \
@@ -466,7 +472,6 @@ AC_OUTPUT(	Makefile \
 		doc/Makefile \
 		man/Makefile \
 		\
-		intl/Makefile \
 		po/Makefile.in \
 		\
 		example/eaglecad1/Makefile \
@@ -491,7 +496,8 @@ AC_OUTPUT(	Makefile \
 		test/inputs/Makefile \
 		\
 		win32/Makefile \
-		)
+		])
+AC_OUTPUT
         
 expandedXDGDATADIR=`eval "echo $XDGDATADIR"`
 

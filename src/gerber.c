@@ -28,8 +28,10 @@
 
 #include "gerbv.h"
 
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <math.h>  /* pow() */
 #include <errno.h>
 #include <ctype.h>
@@ -1003,10 +1005,15 @@ parse_G_code(gerb_file_t *fd, gerb_state_t *state,
 	break;
     case 4:  /* Ignore Data Block */
 	/* Don't do anything, just read 'til * */
-        /* SDB asks:  Should we look for other codes while reading G04 in case
-	 * user forgot to put * at end of comment block? */
 	do {
 	    c = gerb_fgetc(fd);
+            if (c == '\r' || c == '\n') {
+                gerbv_stats_printf(error_list, GERBV_MESSAGE_WARNING, -1,
+                                   _("Found newline while parsing "
+                                     "G04 code at line %ld in file \"%s\", "
+                                     "maybe you forgot a \"*\"?"),
+                                   *line_num_p, fd->filename);
+            }
 	}
 	while (c != EOF && c != '*');
 
@@ -1091,7 +1098,7 @@ parse_G_code(gerb_file_t *fd, gerb_state_t *state,
 		    "at line %ld in file \"%s\""),
 		op_int, *line_num_p, fd->filename);
 	gerbv_stats_printf(error_list, GERBV_MESSAGE_WARNING, -1,
-		_("Ignorning unknown G code G%02d"), op_int);
+		_("Ignoring unknown G code G%02d"), op_int);
 	stats->G_unknown++;
 /* TODO: insert error count here */
 
@@ -1182,7 +1189,7 @@ parse_M_code(gerb_file_t *fd, gerbv_image_t *image, long int *line_num_p)
 		_("Encountered unknown M%02d code at line %ld in file \"%s\""),
 		op_int, *line_num_p, fd->filename);
 	gerbv_stats_printf(stats->error_list, GERBV_MESSAGE_WARNING, -1,
-		_("Ignorning unknown M%02d code"), op_int);
+		_("Ignoring unknown M%02d code"), op_int);
 	stats->M_unknown++;
     }
     return 0;
@@ -1849,18 +1856,20 @@ parse_rs274x(gint levelOfRecursion, gerb_file_t *fd, gerbv_image_t *image,
  */
 typedef struct {
     double *stack;
-    int sp;
+    size_t sp;
+    size_t capacity;
 } macro_stack_t;
 
 
 static macro_stack_t *
-new_stack(unsigned int stack_size)
+new_stack(size_t stack_size)
 {
     macro_stack_t *s;
 
     s = (macro_stack_t *) g_new0 (macro_stack_t,1);
     s->stack = (double *) g_new0 (double, stack_size);
     s->sp = 0;
+    s->capacity = stack_size;
     return s;
 } /* new_stack */
 
@@ -1881,6 +1890,10 @@ free_stack(macro_stack_t *s)
 static void
 push(macro_stack_t *s, double val)
 {
+    if (s->sp >= s->capacity) {
+        GERB_FATAL_ERROR(_("push will overflow stack capacity"));
+        return;
+    }
     s->stack[s->sp++] = val;
     return;
 } /* push */
@@ -1935,14 +1948,22 @@ simplify_aperture_macro(gerbv_aperture_t *aperture, gdouble scale)
 	case GERBV_OPCODE_PUSH :
 	    push(s, ip->data.fval);
 	    break;
-        case GERBV_OPCODE_PPUSH :
-	    push(s, lp[ip->data.ival - 1]);
+        case GERBV_OPCODE_PPUSH : {
+	    ssize_t const idx = ip->data.ival - 1;
+	    if ((idx < 0) || (idx >= APERTURE_PARAMETERS_MAX))
+		GERB_FATAL_ERROR(_("Tried to access oob aperture"));
+	    push(s, lp[idx]);
 	    break;
-	case GERBV_OPCODE_PPOP:
+	}
+	case GERBV_OPCODE_PPOP: {
 	    if (pop(s, &tmp[0]) < 0)
 		GERB_FATAL_ERROR(_("Tried to pop an empty stack"));
-	    lp[ip->data.ival - 1] = tmp[0];
+	    ssize_t const idx = ip->data.ival - 1;
+	    if ((idx < 0) || (idx >= APERTURE_PARAMETERS_MAX))
+		GERB_FATAL_ERROR(_("Tried to access oob aperture"));
+	    lp[idx] = tmp[0];
 	    break;
+	}
 	case GERBV_OPCODE_ADD :
 	    if (pop(s, &tmp[0]) < 0)
 		GERB_FATAL_ERROR(_("Tried to pop an empty stack"));
@@ -1993,8 +2014,22 @@ simplify_aperture_macro(gerbv_aperture_t *aperture, gdouble scale)
 		 * - number of points defined in entry 1 of the stack + 
 		 *   start point. Times two since it is both X and Y.
 		 * - Then three more; exposure,  nuf points and rotation.
+		 *
+		 * @warning Calculation must be guarded against signed integer
+		 *     overflow
+		 *
+		 * @see CVE-2021-40394
 		 */
-		nuf_parameters = ((int)s->stack[1] + 1) * 2 + 3;
+		int const sstack = (int)s->stack[1];
+		if ((sstack < 0) || (sstack >= INT_MAX / 4)) {
+			GERB_COMPILE_ERROR(_("Possible signed integer overflow "
+					"in calculating number of parameters "
+					"to aperture macro, will clamp to "
+					"(%d)"), APERTURE_PARAMETERS_MAX);
+			nuf_parameters = APERTURE_PARAMETERS_MAX;
+		} else {
+			nuf_parameters = (sstack + 1) * 2 + 3;
+		}
 		break;
 	    case 5 :
 		dprintf("  Aperture macro polygon [5] (");
@@ -2034,8 +2069,8 @@ simplify_aperture_macro(gerbv_aperture_t *aperture, gdouble scale)
 	    if (type != GERBV_APTYPE_NONE) { 
 		if (nuf_parameters > APERTURE_PARAMETERS_MAX) {
 			GERB_COMPILE_ERROR(_("Number of parameters to aperture macro (%d) "
-							"are more than gerbv is able to store (%d)"),
-							nuf_parameters, APERTURE_PARAMETERS_MAX);
+					"are more than gerbv is able to store (%d)"),
+					nuf_parameters, APERTURE_PARAMETERS_MAX);
 			nuf_parameters = APERTURE_PARAMETERS_MAX;
 		}
 
@@ -2048,6 +2083,15 @@ simplify_aperture_macro(gerbv_aperture_t *aperture, gdouble scale)
 		sam->next = NULL;
 		memset(sam->parameter, 0, 
 		       sizeof(double) * APERTURE_PARAMETERS_MAX);
+
+		/* CVE-2021-40400
+		 */
+		if (nuf_parameters > s->capacity) {
+			GERB_COMPILE_ERROR(_("Number of parameters to aperture macro (%d) "
+					"capped to stack capacity (%zu)"),
+					nuf_parameters, s->capacity);
+			nuf_parameters = s->capacity;
+		}
 		memcpy(sam->parameter, s->stack, 
 		       sizeof(double) *  nuf_parameters);
 		
@@ -2188,12 +2232,20 @@ parse_aperture_definition(gerb_file_t *fd, gerbv_aperture_t *aperture,
      * Read in the whole aperture defintion and tokenize it
      */
     ad = gerb_fgetstring(fd, '*');
+
+    if (ad == NULL) {
+	gerbv_stats_printf(error_list, GERBV_MESSAGE_ERROR, -1,
+		_("Invalid aperture definition at line %ld in file \"%s\", "
+		    "cannot find '*'"),
+		*line_num_p, fd->filename);
+	return -1;
+    }
+
     token = strtok(ad, ",");
     
     if (token == NULL) {
 	gerbv_stats_printf(error_list, GERBV_MESSAGE_ERROR, -1,
-		_("Invalid aperture definition "
-		    "at line %ld in file \"%s\""),
+		_("Invalid aperture definition at line %ld in file \"%s\""),
 		*line_num_p, fd->filename);
 	return -1;
     }

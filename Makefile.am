@@ -19,13 +19,15 @@
 ##  along with this program; if not, write to the Free Software
 ##  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111 USA
 
+@CODE_COVERAGE_RULES@
+
 SUBDIRS = \
 	src \
 	scheme \
 	share/glib-2.0/schemas \
 	desktop \
 	doc man \
-	intl po \
+	po \
 	example \
 	test \
 	win32
@@ -42,4 +44,4 @@ DISTCHECK_CONFIGURE_FLAGS = \
 
 .PHONY: doxygen
 doxygen:
-	doxygen doc/Doxyfile.nopreprocessing
+	PROJECT_NUMBER=@VERSION@ doxygen doc/Doxyfile.nopreprocessing

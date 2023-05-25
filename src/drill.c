@@ -117,6 +117,8 @@ static int drill_parse_T_code(gerb_file_t *fd, drill_state_t *state,
 				gerbv_image_t *image, ssize_t file_line);
 static int drill_parse_header_is_metric(gerb_file_t *fd, drill_state_t *state,
 				gerbv_image_t *image, ssize_t file_line);
+static int drill_parse_header_is_metric_comment(gerb_file_t *fd, drill_state_t *state,
+                                                gerbv_image_t *image, ssize_t file_line);
 static int drill_parse_header_is_inch(gerb_file_t *fd, drill_state_t *state,
 				gerbv_image_t *image, ssize_t file_line);
 static int drill_parse_header_is_ici(gerb_file_t *fd, drill_state_t *state,
@@ -128,6 +130,7 @@ static drill_state_t *new_state(drill_state_t *state);
 static double read_double(gerb_file_t *fd, number_fmt_t fmt,
 				gerbv_omit_zeros_t omit_zeros, int decimals);
 static void eat_line(gerb_file_t *fd);
+static void eat_whitespace(gerb_file_t *fd);
 static char *get_line(gerb_file_t *fd);
 static int file_check_str(gerb_file_t *fd, const char *str);
 
@@ -381,6 +384,9 @@ parse_drillfile(gerb_file_t *fd, gerbv_HID_Attribute *attr_list, int n_attr, int
 
 	case ';' :
 	    /* Comment found. Eat rest of line */
+	    if (drill_parse_header_is_metric_comment(fd, state, image, file_line)) {
+		break;
+	    }
 	    tmps = get_line(fd);
 	    gerbv_stats_printf(stats->error_list, GERBV_MESSAGE_NOTE, -1,
 		    _("Comment \"%s\" at line %ld in file \"%s\""),
@@ -480,6 +486,12 @@ parse_drillfile(gerb_file_t *fd, gerbv_HID_Attribute *attr_list, int n_attr, int
 		curr_net->stop_x = state->curr_x;
 		curr_net->stop_y = state->curr_y;
 
+		if (state->unit == GERBV_UNIT_MM) {
+		    /* Convert to inches -- internal units */
+		    curr_net->stop_x /= 25.4;
+		    curr_net->stop_y /= 25.4;
+		}
+
 		r = image->aperture[state->current_tool]->parameter[0]/2;
 
 		/* Update boundingBox with drilled slot stop_x,y coords */
@@ -490,11 +502,6 @@ parse_drillfile(gerb_file_t *fd, gerbv_HID_Attribute *attr_list, int n_attr, int
 
 		drill_update_image_info_min_max_from_bbox(image->info, bbox);
 
-		if (state->unit == GERBV_UNIT_MM) {
-		    /* Convert to inches -- internal units */
-		    curr_net->stop_x /= 25.4;
-		    curr_net->stop_y /= 25.4;
-		}
 		curr_net->aperture_state = GERBV_APERTURE_STATE_ON;
 
 		break;
@@ -764,7 +771,7 @@ parse_drillfile(gerb_file_t *fd, gerbv_HID_Attribute *attr_list, int n_attr, int
 	      for (c = 1 ; c <= rcnt ; c++) {
 		state->curr_x = start_x + c*step_x;
 		state->curr_y = start_y + c*step_y;
-		dprintf ("    Repeat #%d — new location is (%g, %g)\n", c, state->curr_x, state->curr_y);
+		dprintf ("    Repeat #%d - new location is (%g, %g)\n", c, state->curr_x, state->curr_y);
 		curr_net = drill_add_drill_hole (image, state, stats, curr_net);
 	      }
 	      
@@ -1115,10 +1122,12 @@ drill_parse_T_code(gerb_file_t *fd, drill_state_t *state,
 		_("Out of bounds drill number %d "
 		    "at line %ld in file \"%s\""),
 		tool_num, file_line, fd->filename);
+	return -1;
     }
 
     /* Set the current tool to the correct one */
     state->current_tool = tool_num;
+    apert = image->aperture[tool_num];
 
     /* Check for a size definition */
     temp = gerb_fgetc(fd);
@@ -1155,7 +1164,6 @@ drill_parse_T_code(gerb_file_t *fd, drill_state_t *state,
 			    "at line %ld in file \"%s\""),
 			    size, tool_num, file_line, fd->filename);
 	    } else {
-		apert = image->aperture[tool_num];
 		if (apert != NULL) {
 		    /* allow a redefine of a tool only if the new definition is exactly the same.
 		     * This avoid lots of spurious complaints with the output of some cad
@@ -1426,11 +1434,15 @@ header_again:
 		    image->format->omit_zeros = GERBV_OMIT_ZEROS_LEADING;
 	    }
 
-	    if (state->autod) {
+	    if (state->autod && state->number_format != FMT_USER) {
 		/* Default metric number format is 6-digit, 1 um
 		 * resolution.  The header number format (for T#C#
 		 * definitions) is fixed to that, while the number
-		 * format within the file can differ. */
+		 * format within the file can differ.  If the
+		 * number_format is already FMT_USER, that means that
+		 * we have set the number format in another way, maybe
+		 * with one of the altium FILE_FORMAT= style comments,
+		 * so don't do this default. */
 		state->header_number_format =
 		    state->number_format = FMT_000_000;
 		state->decimals = 3;
@@ -1516,6 +1528,79 @@ header_junk:
 
     return 1;
 } /* drill_parse_header_is_metric() */
+
+/* -------------------------------------------------------------- */
+/* Look for a comment like FILE_FORMAT=4:4 and interpret it as if the
+ * format will be 4 digits before the decimal point and 4 after.
+ * Return non-zero if we find a FILE_FORMAT header, otherwise return
+ * 0. */
+static int
+drill_parse_header_is_metric_comment(gerb_file_t *fd, drill_state_t *state,
+                                     gerbv_image_t *image, ssize_t file_line) {
+  gerbv_drill_stats_t *stats = image->drill_stats;
+
+  dprintf("    %s(): entering\n", __FUNCTION__);
+  /* The leading semicolon is already gone. */
+  if (DRILL_HEADER != state->curr_section) {
+    return 0;
+  }
+
+  switch (file_check_str(fd, "FILE_FORMAT")) {
+    case -1:
+      gerbv_stats_printf(stats->error_list, GERBV_MESSAGE_ERROR, -1,
+                         _("Unexpected EOF found while parsing \"%s\" string "
+                           "in file \"%s\" on line %ld"),
+                         "FILE_FORMAT", fd->filename, file_line);
+      return 0;
+    case 0:
+      return 0;
+  }
+
+  eat_whitespace(fd);
+  if (file_check_str(fd, "=") != 1) {
+    gerbv_stats_printf(stats->error_list, GERBV_MESSAGE_ERROR, -1,
+                       _("Expected '=' while parsing \"%s\" string "
+                         "in file \"%s\" on line %ld"),
+                       "FILE_FORMAT", fd->filename, file_line);
+    return 0;
+  }
+  eat_whitespace(fd);
+  int len = -1;
+  gerb_fgetint(fd, &len);
+  if (len < 1) {
+    /* We've failed to read a number. */
+    gerbv_stats_printf(
+        stats->error_list, GERBV_MESSAGE_ERROR, -1,
+        _("Expected integer after '=' while parsing \"%s\" string "
+          "in file \"%s\" on line %ld"),
+        "FILE_FORMAT", fd->filename, file_line);
+    return 0;
+  }
+  eat_whitespace(fd);
+  if (file_check_str(fd, ":") != 1) {
+    gerbv_stats_printf(stats->error_list, GERBV_MESSAGE_ERROR, -1,
+                       _("Expected ':' while parsing \"%s\" string "
+                         "in file \"%s\" on line %ld"),
+                       "FILE_FORMAT", fd->filename, file_line);
+    return 0;
+  }
+  eat_whitespace(fd);
+  len = -1;
+  int digits_after = gerb_fgetint(fd, &len);
+  if (len < 1) {
+    gerbv_stats_printf(
+        stats->error_list, GERBV_MESSAGE_ERROR, -1,
+        _("Expected integer after ':' while parsing \"%s\" string "
+          "in file \"%s\" on line %ld"),
+        "FILE_FORMAT", fd->filename, file_line);
+    /* We've failed to read a number. */
+    return 0;
+  }
+  state->header_number_format = state->number_format = FMT_USER;
+  state->decimals = digits_after;
+  state->autod = 0;
+  return 1;
+} /* drill_parse_header_is_metric_comment() */
 
 /* -------------------------------------------------------------- */
 static int
@@ -1707,38 +1792,48 @@ drill_parse_coordinate(gerb_file_t *fd, char firstchar,
 		       gerbv_image_t *image, drill_state_t *state,
 		       ssize_t file_line)
 {
-    int read;
     gerbv_drill_stats_t *stats = image->drill_stats;
 
-    if(state->coordinate_mode == DRILL_MODE_ABSOLUTE) {
-	if (firstchar == 'X') {
-	    state->curr_x = read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
-	    if ((read = (char)gerb_fgetc(fd)) == 'Y') {
-		state->curr_y = read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
-	    } else {
-		gerb_ungetc(fd);
-	    }
-	} else if (firstchar == 'Y') {
-	    state->curr_y = read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
-	}
-    } else if(state->coordinate_mode == DRILL_MODE_INCREMENTAL) {
-	if (firstchar == 'X') {
-	    state->curr_x += read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
-	    if((read = (char)gerb_fgetc(fd)) == 'Y') {
-		state->curr_y += read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
-	    } else {
-		gerb_ungetc(fd);
-	    }
-	} else if (firstchar == 'Y') {
-	    state->curr_y += read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
-	}
-    } else {
-	gerbv_stats_printf(stats->error_list, GERBV_MESSAGE_ERROR, -1,
-		_("Coordinate mode is not absolute and not incremental "
-		    "at line %ld in file \"%s\""),
-		file_line, fd->filename);
-    }
+    double x = 0;
+    gboolean found_x = FALSE;
+    double y = 0;
+    gboolean found_y = FALSE;
 
+
+    while (TRUE) {
+      if (firstchar == 'X') {
+        x = read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
+        found_x = TRUE;
+      } else if (firstchar == 'Y') {
+        y = read_double(fd, state->number_format, image->format->omit_zeros, state->decimals);
+        found_y = TRUE;
+      } else {
+        gerb_ungetc(fd);
+        break;
+      }
+      eat_whitespace(fd);
+      firstchar = gerb_fgetc(fd);
+    }
+    if(state->coordinate_mode == DRILL_MODE_ABSOLUTE) {
+      if (found_x) {
+        state->curr_x = x;
+      }
+      if (found_y) {
+        state->curr_y = y;
+      }
+    } else if(state->coordinate_mode == DRILL_MODE_INCREMENTAL) {
+      if (found_x) {
+        state->curr_x += x;
+      }
+      if (found_y) {
+        state->curr_y += y;
+      }
+    } else {
+      gerbv_stats_printf(stats->error_list, GERBV_MESSAGE_ERROR, -1,
+                         _("Coordinate mode is not absolute and not incremental "
+                           "at line %ld in file \"%s\""),
+                         file_line, fd->filename);
+    }
 } /* drill_parse_coordinate */
 
 
@@ -1924,7 +2019,7 @@ read_double(gerb_file_t *fd, number_fmt_t fmt, gerbv_omit_zeros_t omit_zeros, in
 } /* read_double */
 
 /* -------------------------------------------------------------- */
-/* Eats all characters up to and including 
+/* Eats all characters up to and including
    the first one of CR or LF */
 static void
 eat_line(gerb_file_t *fd)
@@ -1939,6 +2034,22 @@ eat_line(gerb_file_t *fd)
     if (read != EOF)
 	gerb_ungetc(fd);
 } /* eat_line */
+
+/* -------------------------------------------------------------- */
+/* Eats all tabs and spaces. */
+static void
+eat_whitespace(gerb_file_t *fd)
+{
+    int read;
+
+    do {
+	read = gerb_fgetc(fd);
+    } while ((read == ' ' || read == '\t') && read != EOF);
+
+    /* Restore the non-whitespace character for processing */
+    if (read != EOF)
+	gerb_ungetc(fd);
+} /* eat_whitespace */
 
 /* -------------------------------------------------------------- */
 static char *
@@ -1969,6 +2080,11 @@ get_line(gerb_file_t *fd)
 } /* get_line */
 
 /* -------------------------------------------------------------- */
+/* Look for str in the file fd.  If found, return 1.  If not, return
+ * 0.  If EOF is reached while searching, return -1. If the find
+ * fails, rewinds the file descriptor.  Otherwise, it doesn't and the
+ * string is consumed.
+ */
 static int
 file_check_str(gerb_file_t *fd, const char *str)
 {

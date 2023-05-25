@@ -223,7 +223,7 @@ gerbv_export_rs274x_file_from_image (const gchar *filename, gerbv_image_t *input
 	fprintf(fd, "G04 This is an RS-274x file exported by *\n");
 	fprintf(fd, "G04 gerbv version %s *\n",VERSION);
 	fprintf(fd, "G04 More information is available about gerbv at *\n");
-	fprintf(fd, "G04 http://gerbv.geda-project.org/ *\n");
+	fprintf(fd, "G04 https://gerbv.github.io/ *\n");
 	fprintf(fd, "G04 --End of header info--*\n");
 	fprintf(fd, "%%MOIN*%%\n");
 	fprintf(fd, "%%FSLAX36Y36*%%\n");
@@ -246,10 +246,9 @@ gerbv_export_rs274x_file_from_image (const gchar *filename, gerbv_image_t *input
 
 	/* image rotation */
 	if ((image->info->imageRotation != 0.0)
-	||  (thisTransform->rotation != 0.0))
+	     ||  (thisTransform->rotation != 0.0))
 		fprintf(fd, "%%IR%d*%%\n",
-			(int)(RAD2DEG(image->info->imageRotation +
-					thisTransform->rotation))%360);
+		        (int)round(RAD2DEG(image->info->imageRotation))%360);
 
 	if ((image->info->imageJustifyTypeA != GERBV_JUSTIFY_NOJUSTIFY)
 	||  (image->info->imageJustifyTypeB != GERBV_JUSTIFY_NOJUSTIFY)) {

@@ -1,0 +1,137 @@
+name: CI
+
+# Controls when the action will run. Triggers the workflow on push or pull
+# request events but only for the main branch
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches: [ main ]
+
+
+jobs:
+  ci:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        coverage: ["-coverage", ""] # Coverage build and a regular one
+        include:
+          - coverage: "-coverage"
+            code_coverage: "--enable-code-coverage" # Only coverage build has this defined.
+    name: ci${{ matrix.coverage }} # Coverage build has "-coverage" added to the name.
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Get number of jobs for compiling
+      run: echo "NUM_BUILD_JOBS=$((`nproc --all` * 4))" >> $GITHUB_ENV
+
+    - name: Set a local install path
+      run: echo "LOCAL_INSTALL_PATH=${HOME}/.local" >> $GITHUB_ENV
+
+    - name: Get requirements for configure and build
+      run: |
+        sudo apt-get update
+        sudo apt-get install autopoint libgtkmm-2.4-dev desktop-file-utils libc6-dbg
+
+    - name: Install coverage specific programs
+      if: matrix.code_coverage
+      run: |
+        sudo apt-get install libperlio-gzip-perl libjson-perl
+        pushd ~
+        git clone --depth=1 --branch=v1.16 https://github.com/linux-test-project/lcov.git
+        pushd lcov
+        make PREFIX=${LOCAL_INSTALL_PATH} install
+        hash -r
+        lcov --version
+
+    - name: Install valgrind
+      if: "!matrix.code_coverage"
+      run: |
+        pushd ~
+        git clone --depth=1 --branch=master https://github.com/eyal0/valgrind.git
+        pushd valgrind
+        sh autogen.sh
+        ./configure --prefix=${LOCAL_INSTALL_PATH}
+        make -j ${NUM_BUILD_JOBS}
+        make install
+        popd
+        popd
+
+    - name: Configure
+      run: |
+        sh autogen.sh
+        ./configure CPPFLAGS_EXTRA=-Werror ${{ matrix.code_coverage }}
+
+    - name: Remove debug and optimization and valgrind from coverage builds
+      if: matrix.code_coverage
+      run: |
+        find . -name Makefile | xargs sed -i 's/-O[0-9]/-O0/g' # No optimizations
+        find . -name Makefile | xargs sed -i 's/-g /-g0 /g' # No debugging
+        : > test/run_valgrind_tests.sh # No valgrind tests.
+
+    - name: Build
+      run: make -j ${NUM_BUILD_JOBS}
+
+    - name: Reset coverage
+      if: matrix.code_coverage
+      continue-on-error: true
+      run: lcov --directory . -z
+
+    - name: Run unit tests
+      run: |
+        make check || (cat test/test-suite.log && false)
+
+    - name: Gather coverage
+      if: matrix.code_coverage
+      run: |
+        lcov --rc lcov_branch_coverage=1 -rc lcov_function_coverage=1 --directory . --capture --no-external --output-file "gerbv-lcov.info"
+
+    - name: Upload coverage to coveralls
+      if: matrix.code_coverage
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path-to-lcov: gerbv-lcov.info
+
+    - name: Rebuild Fedora 36
+      if: "!matrix.code_coverage"
+      run: npx --package mini-cross@0.15.2 mc --no-tty fedora:36 .mc/rebuild.sh
+
+    - name: Rebuild Ubuntu 22.04
+      if: "!matrix.code_coverage"
+      run: npx --package mini-cross@0.15.2 mc --no-tty ubuntu:22.04 .mc/rebuild.sh
+
+    - name: Rebuild Windows amd64
+      if: "!matrix.code_coverage"
+      run: npx --package mini-cross@0.15.2 mc --no-tty windows:amd64 .mc/rebuild.sh
+
+    - name: Upload executable artifacts
+      if: "!matrix.code_coverage"
+      uses: actions/upload-artifact@v3
+      with:
+        name: gerbv
+        path: gerbv.github.io/ci/gerbv*
+        if-no-files-found: error
+
+    - name: Rebuild gerbv.github.io
+      if: "!matrix.code_coverage"
+      run: |
+        npx --package mini-cross@0.15.2 mc --no-tty website make -C gerbv.github.io
+        find gerbv.github.io -type f -name '.gitignore' -exec rm {} \;
+
+    - name: Deploy gerbv.github.io
+      uses: JamesIves/github-pages-deploy-action@v4.4.1
+      with:
+        repository-name: gerbv/gerbv.github.io
+        branch: gh-pages
+        folder: gerbv.github.io
+        token: ${{ secrets.GERBV_BUILDBOT_PAT }}
+        git-config-name: gerbv-buildbot
+        git-config-email: violetland+gerbv@mail.ru
+        single-commit: true
+      # @see https://github.community/t/how-can-i-test-if-secrets-are-available-in-an-action/17911/10
+      env:
+        GERBV_BUILDBOT_PAT: ${{ secrets.GERBV_BUILDBOT_PAT }}
+      if: ${{ success() && github.event_name == 'push' && env.GERBV_BUILDBOT_PAT  && !matrix.code_coverage }}

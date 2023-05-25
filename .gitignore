@@ -21,11 +21,13 @@ doc/html/*.css
 doc/html/*.html
 doc/html/*.js
 doc/html/*.png
+doc/html/*.svg
 install-sh
 intl/
 libtool
 ltmain.sh
-m4/
+m4/*
+!m4/ax_code_coverage.m4
 man/gerbv.1
 missing
 mkinstalldirs
@@ -45,11 +47,21 @@ src/.libs
 src/authors.c
 src/bugs.c
 src/gerbv
+src/gerbv.exe
 src/gerbv.orig
+src/gerbv_icon.ico
 src/libgerbv.la
 src/libgerbv.pc
 src/run_gerbv
+
+# Coverage related files
+src/*.gcno
+src/*.gcda
+gerbv-lcov.info
+
 stamp-h1
 test-driver
 test/mismatch/
 test/outputs/
+win32/BUGS.txt
+win32/COPYING.txt
