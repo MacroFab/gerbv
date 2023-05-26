@@ -90,7 +90,7 @@ extern "C" {
  * macro. There (p. 28) is defined up to 50 points in polygon.
  * So 50 points with x and y plus two for holding extra data gives...
  */
-#define APERTURE_PARAMETERS_MAX 102
+#define APERTURE_PARAMETERS_MAX 402
 #define GERBV_SCALE_MIN 10
 #define GERBV_SCALE_MAX 3000
 #define MAX_ERRMSGLEN 25
