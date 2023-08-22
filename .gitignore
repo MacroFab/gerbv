@@ -65,3 +65,4 @@ test/mismatch/
 test/outputs/
 win32/BUGS.txt
 win32/COPYING.txt
+.DS_Store
