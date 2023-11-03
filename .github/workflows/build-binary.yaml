@@ -1,0 +1,37 @@
+name: build-binary
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+  release:
+    types: [created]
+
+jobs:
+    build-image:
+        name: Build image
+        if: ${{ !github.event.pull_request.draft }}
+        runs-on: ubuntu-20.04
+        steps:
+          - name: Checkout the Repo
+            uses: actions/checkout@v2
+          - name: install deps
+            run: |
+                sudo apt update
+                sudo apt -y install autoconf autopoint build-essential curl git libcairo2-dev libgtk2.0-dev make m4 pandoc pkg-config
+          - name: build package
+            run: |
+                ./autogen.sh
+                ./configure --disable-update-desktop-database
+                make
+                tar zcf ../gerbv.tar.gz .
+          - name: upload the artifacts
+            if: github.event_name == 'release' && github.event.action == 'created'
+            uses: softprops/action-gh-release@v1
+            with:
+                files: ../gerbv.tar.gz
+
+                
