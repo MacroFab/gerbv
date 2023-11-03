@@ -20,8 +20,8 @@ jobs:
             uses: actions/checkout@v2
           - name: install deps
             run: |
-                apt update
-                apt -y install autoconf autopoint build-essential curl git libcairo2-dev libgtk2.0-dev make m4 pandoc pkg-config
+                sudo apt update
+                sudo apt -y install autoconf autopoint build-essential curl git libcairo2-dev libgtk2.0-dev make m4 pandoc pkg-config
           - name: build package
             run: |
                 ./autogen.sh
