@@ -27,7 +27,7 @@ jobs:
                 ./autogen.sh
                 ./configure --disable-update-desktop-database
                 make
-                make install
+                sudo make install
                 tar zcvf ../gerbv.tar.gz /usr/local
           - name: upload the artifacts
             if: github.event_name == 'release' && github.event.action == 'created'
