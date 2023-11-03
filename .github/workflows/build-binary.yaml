@@ -27,7 +27,10 @@ jobs:
                 ./autogen.sh
                 ./configure --disable-update-desktop-database
                 make
-                tar zcf ../gerbv.tar.gz .
+                mkdir ../install
+                make install DESTDIR=$(pwd)/../install/
+                cd ../install
+                tar zcvf ../gerbv.tar.gz usr/local
           - name: upload the artifacts
             if: github.event_name == 'release' && github.event.action == 'created'
             uses: softprops/action-gh-release@v1
