@@ -30,8 +30,8 @@ jobs:
                 tar zcf ../gerbv.tar.gz .
           - name: upload the artifacts
             if: github.event_name == 'release' && github.event.action == 'created'
-            uses: skx/github-action-publish-binaries@master
+            uses: softprops/action-gh-release@v1
             with:
-                args: ../gerbv.tar.gz
+                files: ../gerbv.tar.gz
 
                 
