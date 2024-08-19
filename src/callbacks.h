@@ -40,14 +40,13 @@ typedef enum {
 	CALLBACKS_SAVE_FILE_DRILLM,
 	CALLBACKS_SAVE_LAYER_AS,
 	CALLBACKS_SAVE_FILE_IDRILL
-	
-} CALLBACKS_SAVE_FILE_TYPE;
+};
 
 typedef enum {
 	LAYER_SELECTED =	-1,
 	LAYER_ALL_ON =		-2,
 	LAYER_ALL_OFF =		-3,
-} toggle_layer;
+};
 
 void
 callbacks_new_project_activate                (GtkMenuItem     *menuitem,
