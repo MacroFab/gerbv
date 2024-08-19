@@ -17,7 +17,7 @@ jobs:
     with:
       ubuntu_version: 20.04
       filename: gerbv.tar.gz
-      upload: github.event_name == 'release' && github.event.action == 'created'
+      upload: ${{ github.event_name == 'release' && github.event.action == 'created' }}
 
   build-image-22-04:
     name: Build image 22.04
@@ -25,4 +25,4 @@ jobs:
     with:
       ubuntu_version: 22.04
       filename: gerbv-22.04.tar.gz
-      upload: github.event_name == 'release' && github.event.action == 'created'
+      upload: ${{ github.event_name == 'release' && github.event.action == 'created' }}
