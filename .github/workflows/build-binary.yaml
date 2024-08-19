@@ -11,56 +11,18 @@ on:
     types: [created]
 
 jobs:
-    build-image-20-04:
-        name: Build image 20.04
-        if: ${{ !github.event.pull_request.draft }}
-        runs-on: ubuntu-20.04
-        steps:
-          - name: Checkout the Repo
-            uses: actions/checkout@v2
-          - name: install deps
-            run: |
-                sudo apt update
-                sudo apt -y install autoconf autopoint build-essential curl git libcairo2-dev libgtk2.0-dev make m4 pandoc pkg-config
-          - name: build package
-            run: |
-                ./autogen.sh
-                ./configure --disable-update-desktop-database
-                make
-                mkdir ../install
-                make install DESTDIR=$(pwd)/../install/
-                cd ../install
-                tar zcvf ../gerbv.tar.gz usr/local
-          - name: upload the artifacts
-            if: github.event_name == 'release' && github.event.action == 'created'
-            uses: softprops/action-gh-release@v1
-            with:
-                files: ../gerbv.tar.gz
+  build-image-20-04:
+    name: Build image 20.04
+    uses: ./.github/workflows/build-binary-on-ubuntu.yaml
+    with:
+      ubuntu_version: 20.04
+      filename: gerbv.tar.gz
+      upload: github.event_name == 'release' && github.event.action == 'created'
 
-    build-image-22-04:
-        name: Build image 22.04
-        if: ${{ !github.event.pull_request.draft }}
-        runs-on: ubuntu-22.04
-        steps:
-          - name: Checkout the Repo
-            uses: actions/checkout@v2
-          - name: install deps
-            run: |
-                sudo apt update
-                sudo apt -y install autoconf autopoint build-essential curl git libcairo2-dev libgtk2.0-dev make m4 pandoc pkg-config
-          - name: build package
-            run: |
-                ./autogen.sh
-                ./configure --disable-update-desktop-database
-                make
-                mkdir ../install
-                make install DESTDIR=$(pwd)/../install/
-                cd ../install
-                tar zcvf ../gerbv-22.04.tar.gz usr/local
-          - name: upload the artifacts
-            if: github.event_name == 'release' && github.event.action == 'created'
-            uses: softprops/action-gh-release@v1
-            with:
-                files: ../gerbv-22.04.tar.gz
-
-
+  build-image-22-04:
+    name: Build image 22.04
+    uses: ./.github/workflows/build-binary-on-ubuntu.yaml
+    with:
+      ubuntu_version: 22.04
+      filename: gerbv-22.04.tar.gz
+      upload: github.event_name == 'release' && github.event.action == 'created'
