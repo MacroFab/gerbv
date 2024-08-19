@@ -1,0 +1,41 @@
+name: Build the binary on a specific version of ubuntu
+
+on:
+  workflow_call:
+    inputs:
+      ubuntu_version:
+        required: true
+        type: string
+      filename: 
+        required: true
+        type: string
+      upload: 
+        required: true
+        type: boolean
+
+jobs:
+    build-image:
+        name: Build image ${{ inputs.ubuntu_version }}
+        if: ${{ !github.event.pull_request.draft }}
+        runs-on: ubuntu-${{ inputs.ubuntu_version }}
+        steps:
+          - name: Checkout the Repo
+            uses: actions/checkout@v2
+          - name: install deps
+            run: |
+                sudo apt update
+                sudo apt -y install autoconf autopoint build-essential curl git libcairo2-dev libgtk2.0-dev make m4 pandoc pkg-config
+          - name: build package
+            run: |
+                ./autogen.sh
+                ./configure --disable-update-desktop-database
+                make
+                mkdir ../install
+                make install DESTDIR=$(pwd)/../install/
+                cd ../install
+                tar zcvf ../${{ inputs.filename }} usr/local
+          - name: upload the artifacts
+            if: inputs.upload
+            uses: softprops/action-gh-release@v1
+            with:
+                files: ../${{ inputs.filename }}
